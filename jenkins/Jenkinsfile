@@ -1,0 +1,132 @@
+pipeline {
+    agent any
+    
+    environment {
+        DOCKER_REGISTRY = 'ghcr.io'
+        IMAGE_NAME = "${env.JOB_NAME}"
+        KUBERNETES_NAMESPACE = 'default'
+    }
+    
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timeout(time: 30, unit: 'MINUTES')
+        timestamps()
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('Lint') {
+            steps {
+                sh '''
+                    echo "Running linters..."
+                    # Add your linting commands here
+                '''
+            }
+        }
+        
+        stage('Test') {
+            parallel {
+                stage('Unit Tests') {
+                    steps {
+                        sh '''
+                            echo "Running unit tests..."
+                            # Add your test commands here
+                        '''
+                    }
+                }
+                stage('Integration Tests') {
+                    steps {
+                        sh '''
+                            echo "Running integration tests..."
+                            # Add your integration test commands here
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Build') {
+            steps {
+                script {
+                    def imageTag = "${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:${env.BUILD_NUMBER}"
+                    def imageLatest = "${env.DOCKER_REGISTRY}/${env.IMAGE_NAME}:latest"
+                    
+                    sh """
+                        docker build -t ${imageTag} -t ${imageLatest} .
+                        docker push ${imageTag}
+                        docker push ${imageLatest}
+                    """
+                    
+                    env.IMAGE_TAG = imageTag
+                }
+            }
+        }
+        
+        stage('Security Scan') {
+            steps {
+                sh '''
+                    echo "Running security scans..."
+                    # Trivy, Snyk, or other security scanning tools
+                '''
+            }
+        }
+        
+        stage('Deploy to Staging') {
+            when {
+                branch 'develop'
+            }
+            steps {
+                script {
+                    sh """
+                        kubectl set image deployment/app \
+                            app=${env.IMAGE_TAG} \
+                            -n staging
+                        kubectl rollout status deployment/app -n staging
+                    """
+                }
+            }
+        }
+        
+        stage('Deploy to Production') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    input message: 'Deploy to production?', ok: 'Deploy'
+                    sh """
+                        kubectl set image deployment/app \
+                            app=${env.IMAGE_TAG} \
+                            -n production
+                        kubectl rollout status deployment/app -n production
+                    """
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo 'Pipeline succeeded!'
+            // Add notifications here
+        }
+        failure {
+            echo 'Pipeline failed!'
+            script {
+                // Rollback logic
+                sh """
+                    kubectl rollout undo deployment/app -n ${env.KUBERNETES_NAMESPACE}
+                """
+            }
+        }
+        always {
+            cleanWs()
+        }
+    }
+}
+
