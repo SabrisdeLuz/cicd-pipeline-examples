@@ -78,7 +78,3 @@ include:
 - ✅ Automated rollback on failure
 - ✅ Comprehensive logging and monitoring
 
-## License
-
-MIT License - feel free to use in your projects!
-
